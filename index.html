@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forge Viewer Test</title>
+    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css">
+
+    <style>
+        #forgeViewer {
+            width: 100%;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+
+        @media (max-width: 768px) {
+            #log {
+                display: none;
+            }
+        }
+
+        .adsk-toolbar {
+            position: absolute !important;
+            z-index: 100;
+        }
+
+        @media (max-width: 768px) {
+            .adsk-toolbar {
+                bottom: 5px !important;
+                right: 5px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Forge Viewer Test</h1>
+    <div id="log" style="background-color: #f8f8f8; padding: 10px; max-height: 200px; overflow-y: auto; font-family: Arial, sans-serif; font-size: 14px;">
+        <strong>Log Output:</strong>
+        <div id="logMessages"></div>
+    </div>
+    <div id="forgeViewer"></div>
+
+    <script>
+        function logToPage(message) {
+            const logDiv = document.getElementById('logMessages');
+            const newMessage = document.createElement('p');
+            newMessage.textContent = message;
+            logDiv.appendChild(newMessage);
+        }
+
+        async function getToken() {
+            const headers = new Headers({
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "Authorization": "Basic UkpBS00wTFZmWU5Mc0NKT0lGWlVXZVZuOGJqbVdHOWhnUDIzbmhZTThoejZXYUhnOnJLdDhyQWp0RUtxRk0za1UzYjRpMEwwRHNsQ2lWWnE3OFV4SVZROGE1NEJhN2s2SGhiWVl0eUcwTTF5akdkbHI="
+            });
+
+            const body = new URLSearchParams({
+                grant_type: "client_credentials",
+                scope: "code:all data:write data:read bucket:create bucket:delete bucket:read"
+            });
+
+            try {
+                const response = await fetch("https://developer.api.autodesk.com/authentication/v2/token", {
+                    method: "POST",
+                    headers: headers,
+                    body: body
+                });
+
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                const data = await response.json();
+                return data.access_token;
+            } catch (error) {
+                logToPage('Error fetching token: ' + error.message);
+                return null;
+            }
+        }
+
+        async function initializeViewer() {
+            const documentId = 'urn:dXJuOmFkc2sub2JqZWN0czpvcy5vYmplY3Q6aGFsZm1vb25yZXNvcnQvSEFMRk1PT04lMjBSRVNPUlQlMjAtUlZUJTIwRklMRSUyMC0zMS03LTIwMjQucnZ0';
+            const accessToken = await getToken();
+
+            if (!accessToken) {
+                logToPage('Failed to retrieve access token.');
+                return;
+            }
+
+            Autodesk.Viewing.DefaultSettings.optimizeNavigation = true;
+            Autodesk.Viewing.DefaultSettings.groundShadow = false;
+            Autodesk.Viewing.DefaultSettings.ambientShadows = false;
+
+            const options = {
+                env: 'AutodeskProduction',
+                accessToken: accessToken
+            };
+
+            logToPage('Initializing Forge Viewer');
+
+            Autodesk.Viewing.Initializer(options, () => {
+                const viewerDiv = document.getElementById('forgeViewer');
+                const viewer = new Autodesk.Viewing.GuiViewer3D(viewerDiv);
+
+                viewer.start();
+                viewer.setNavigationLock(false);
+
+                viewer.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, () => {
+                    let toolbar = viewer.getToolbar();
+                    if (!toolbar) {
+                        logToPage("Toolbar not found, creating a new one...");
+                        toolbar = viewer.createToolbar();
+                    }
+
+                    if (toolbar) {
+                        logToPage("Toolbar initialized and visible.");
+                        toolbar.setVisible(true);
+
+                        // Customize toolbar position dynamically
+                        customizeToolbarPosition(toolbar, { bottom: '20px', right: '20px' });
+                    } else {
+                        logToPage("Failed to initialize toolbar.");
+                    }
+                });
+
+                // Load Document Browser extension
+                viewer.loadExtension('Autodesk.DocumentBrowser').then(() => {
+                    logToPage('Document Browser Extension loaded');
+                }).catch((error) => {
+                    logToPage('Error loading Document Browser Extension: ' + error.message);
+                });
+
+                // Event listener for selection to get element properties
+                viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, (event) => {
+                    const dbIds = event.dbIdArray;
+                    if (dbIds.length > 0) {
+                        viewer.getProperties(dbIds[0], (props) => {
+                            logToPage('Selected Element Properties: ' + JSON.stringify(props, null, 2));
+                        }, (error) => {
+                            logToPage('Error fetching properties: ' + error.message);
+                        });
+                    } else {
+                        logToPage('No element selected.');
+                    }
+                });
+
+                Autodesk.Viewing.Document.load(documentId, (doc) => {
+                    logToPage('Document loaded successfully');
+
+                    const defaultModel = doc.getRoot().getDefaultGeometry();
+                    if (!defaultModel) {
+                        logToPage('Error: Default model geometry not found');
+                        return;
+                    }
+
+                    viewer.loadDocumentNode(doc, defaultModel).then(() => {
+                        logToPage('Model loaded successfully in viewer');
+                        addDefaultToolbarButtons(viewer);
+                    }).catch((error) => {
+                        logToPage(`Error loading model: ${error.message}`);
+                    });
+
+                }, (error) => {
+                    logToPage('Error loading document: ' + JSON.stringify(error));
+                });
+            });
+        }
+        function addDefaultToolbarButtons(viewer) {
+    // Access default viewer toolbar
+    const toolbar = viewer.getToolbar();
+
+    // Add First Person Tool
+    const firstPersonButton = toolbar.getControl('navTools').getControl('toolbar-firstpersonTool');
+    if (firstPersonButton) {
+        firstPersonButton.setToolTip('First Person');
+    }
+
+    // Add Distance Measurement Tool
+    const measureButton = toolbar.getControl('measureTools').getControl('toolbar-measureTool');
+    if (measureButton) {
+        measureButton.setToolTip('Measure');
+    }
+
+    // Add Section Tool
+    const sectionButton = toolbar.getControl('modelTools').getControl('toolbar-sectionTool');
+    if (sectionButton) {
+        sectionButton.setToolTip('Section Analysis');
+    }
+
+    // Add Orbit Tool
+    const orbitButton = toolbar.getControl('navTools').getControl('toolbar-orbitTool');
+    if (orbitButton) {
+        orbitButton.setToolTip('Orbit View');
+    }
+
+    // Add Explode Tool
+    const explodeButton = toolbar.getControl('modelTools').getControl('toolbar-explodeTool');
+    if (explodeButton) {
+        explodeButton.setToolTip('Explode Model');
+    }
+
+    // Fullscreen Toggle
+    const fullscreenButton = toolbar.getControl('settingsTools').getControl('toolbar-fullscreenTool');
+    if (fullscreenButton) {
+        fullscreenButton.setToolTip('Full Screen');
+    }
+        }
+
+        function customizeToolbarPosition(toolbar, position = { bottom: '10px', right: '10px' }) {
+            if (toolbar && toolbar.container) {
+                const toolbarContainer = toolbar.container;
+                toolbarContainer.style.position = 'absolute';
+                toolbarContainer.style.bottom = position.bottom;
+                toolbarContainer.style.right = position.right;
+                toolbarContainer.style.zIndex = '100';
+                logToPage(`Toolbar positioned at bottom: ${position.bottom}, right: ${position.right}`);
+            } else {
+                logToPage('Failed to customize toolbar position: Toolbar not found.');
+            }
+        }
+
+        window.onload = initializeViewer;
+    </script>
+</body>
+</html>
